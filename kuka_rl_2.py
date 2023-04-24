@@ -430,22 +430,22 @@ discount = 0.993
 epsilon = 0.07
 beta = .01
 opt_epoch = 10
-season = 1000000
+episode = 100
 batch_size = 128
 tmax = 1000 #env episode steps
 save_scores = []
 start_time = timeit.default_timer()
 
-for s in range(season):
+for s in range(episode):
     policy.eval()
     old_probs_lst, states_lst, actions_lst, rewards_lst, values_lst, dones_list = collect_trajectories(envs=env,
                                                                                                        policy=policy,
                                                                                                        tmax=tmax,
                                                                                                        nrand = 5)
 
-    season_score = rewards_lst.sum(dim=0).item()
-    scores_window.append(season_score)
-    save_scores.append(season_score)
+    episode_score = rewards_lst.sum(dim=0).item()
+    scores_window.append(episode_score)
+    save_scores.append(episode_score)
     
     gea, target_value = calc_returns(rewards = rewards_lst,
                                      values = values_lst,
@@ -534,7 +534,7 @@ for s in range(season):
                     print("Best mean reward updated %.3f -> %.3f, model saved" % (best_mean_reward, mean_reward))
                 best_mean_reward = mean_reward
     if s>=25 and mean_reward>50:
-        print('Environment solved in {:d} seasons!\tAverage Score: {:.2f}'.format(s+1, mean_reward))
+        print('Environment solved in {:d} episodes!\tAverage Score: {:.2f}'.format(s+1, mean_reward))
         break
 
 
@@ -551,7 +551,7 @@ env.close()
 fig = plt.figure()
 plt.plot(np.arange(len(save_scores)), save_scores)
 plt.ylabel('Score')
-plt.xlabel('Season #')
+plt.xlabel('episode #')
 plt.grid()
 plt.show()
 
