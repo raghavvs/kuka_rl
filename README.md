@@ -1,4 +1,12 @@
 # Robotic Grasping
+
+```
+conda create --name rl_robotics python=3.9
+conda activate rl_robotics
+pip install -r requirements.txt
+conda deactivate
+```
+
 Machine learning implementations using OpenAI Gym and PyBullet for robotic grasping.
 
 <img src="img/kuka.gif" height="200">

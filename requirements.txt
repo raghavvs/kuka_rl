@@ -1,0 +1,13 @@
+# requirements.txt
+
+gym
+pybullet==2.6.1
+tensorboard
+tensorboardX==2.0
+matplotlib
+numpy==1.17.4
+Pillow
+torch
+torchvision
+six==1.13.0
+protobuf>=3.8.0,<4

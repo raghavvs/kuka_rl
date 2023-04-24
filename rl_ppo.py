@@ -1,28 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# # Kuka
-# 
-# ---
-# 
-# You are welcome to use this coding environment to train your agent for the project.  Follow the instructions below to get started!
-# 
-# ### Start the Environment
-# 
-
-# Make sure that you're in the right virtual environment and the right python version.
-
-# In[1]:
-
-
-""" get_ipython().system('python --version')
-get_ipython().system('pip install pybullet')
-get_ipython().system('pip install tensorboardX') """
-
-
-# In[2]:
-
-
 import matplotlib.pyplot as plt
 import sys
 from collections import deque
@@ -51,23 +29,8 @@ action_space = spaces.Box(low=-1, high=1, shape=(5,1))
 # if gpu is to be used
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
-# Actor-Critic implementation
-
-# In[3]:
-
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
 def build_hidden_layer(input_dim, hidden_layers):
-    """Build hidden layer.
-    Params
-    ======
-        input_dim (int): Dimension of hidden layer input
-        hidden_layers (list(int)): Dimension of hidden layers
-    """
+  
     hidden = nn.ModuleList([nn.Linear(input_dim, hidden_layers[0])])
     if len(hidden_layers)>1:
         layer_sizes = zip(hidden_layers[:-1], hidden_layers[1:])
@@ -78,17 +41,7 @@ class ActorCritic(nn.Module):
     def __init__(self,state_size,action_size,shared_layers,
                  critic_hidden_layers=[],actor_hidden_layers=[],
                  seed=0, init_type=None):
-        """Initialize parameters and build policy.
-        Params
-        ======
-            state_size (int,int,int): Dimension of each state
-            action_size (int): Dimension of each action
-            shared_layers (list(int)): Dimension of the shared hidden layers
-            critic_hidden_layers (list(int)): Dimension of the critic's hidden layers
-            actor_hidden_layers (list(int)): Dimension of the actor's hidden layers
-            seed (int): Random seed
-            init_type (str): Initialization type
-        """
+    
         super(ActorCritic, self).__init__()
         self.init_type = init_type
         self.seed = torch.manual_seed(seed)
@@ -191,11 +144,6 @@ class ActorCritic(nn.Module):
         return a, value
 
 
-# Examine the state and action spaces.
-
-# In[4]:
-
-
 resize = T.Compose([T.ToPILImage(),
                     T.Resize(40, interpolation=Image.CUBIC),
                     T.ToTensor()])
@@ -231,10 +179,6 @@ plt.imshow(init_screen.cpu().squeeze(0).permute(1, 2, 0).numpy(),
            interpolation='none')
 plt.title('Example extracted screen')
 plt.show()
-
-
-# In[5]:
-
 
 writer = SummaryWriter()
 i_episode = 0
@@ -302,10 +246,6 @@ def collect_trajectories(envs, policy, tmax=200, nrand=5):
     done_list = torch.cat(done_list, dim=0)
     return prob_list, state_list, action_list, reward_list, value_list, done_list
 
-
-# In[6]:
-
-
 def calc_returns(rewards, values, dones):
     n_step = len(rewards)
     n_agent = len(rewards[0])
@@ -339,10 +279,6 @@ def calc_returns(rewards, values, dones):
 
     return GAE, returns
 
-
-# In[7]:
-
-
 def eval_policy(envs, policy, tmax=1000):
     reward_list=[]
     state = envs.reset()
@@ -361,217 +297,160 @@ def eval_policy(envs, policy, tmax=1000):
             break
     return reward_list
 
+def train(env, policy, optimizer, episode=100, tmax=1000, opt_epoch=10, batch_size=128, discount=0.993, epsilon=0.07, beta=0.01):
+    writer = SummaryWriter()
+    best_mean_reward = None
+    scores_window = deque(maxlen=100)  # last 100 scores
+    save_scores = []
+    start_time = timeit.default_timer()
 
-# ## Network Architecture
-# An actor-critic structure with continuous action space is used for this project. The policy consists of 3 parts, a shared hidden layers, actor, and critic.
-# The actor layer outputs the mean value of a normal distribution, from which the agent's action is sampled. The critic layer yields the value function.
-# 
-# - Shared layer:
-# ```
-# Input State(48,48,3) -> Conv2d(3, 16, 5, 2) -> BatchNorm2d(16) -> Conv2d(16, 32, 5, 2)-> BatchNorm2d(32)
-# -> Conv2d(32, 32, 5, 2) -> BatchNorm2d(32) -> Dense(128) -> LeakyReLU -> Dense(128) -> LeakyReLU -> Dense(64) -> LeakyReLU
-# ```
-# - Actor and Critic layers:
-# ```
-# LeakyRelu -> Dense(64) -> LeakyRelu -> Dense(4)-> tanh -> Actor's output
-# LeakyReLU -> Dense(64) -> LeakyRelu -> Dense(1) -> Critic's output
-# ```
-# 
-# ### Model update using PPO/GAE
-# The hyperparameters used during training are:
-# 
-# Parameter | Value | Description
-# ------------ | ------------- | -------------
-# Number of Agents | 1 | Number of agents trained simultaneously
-# tmax | 20 | Maximum number of steps per episode
-# Epochs | 10 | Number of training epoch per batch sampling
-# Batch size | 128 | Size of batch taken from the accumulated  trajectories
-# Discount (gamma) | 0.993 | Discount rate 
-# Epsilon | 0.07 | Ratio used to clip r = new_probs/old_probs during training
-# Gradient clip | 10.0 | Maximum gradient norm 
-# Beta | 0.01 | Entropy coefficient 
-# Tau | 0.95 | tau coefficient in GAE
-# Learning rate | 2e-4 | Learning rate 
-# Optimizer | Adam | Optimization method
-# 
+    for s in range(episode):
+        policy.eval()
+        old_probs_lst, states_lst, actions_lst, rewards_lst, values_lst, dones_list = collect_trajectories(envs=env,
+                                                                                                        policy=policy,
+                                                                                                        tmax=tmax,
+                                                                                                        nrand = 5)
 
-# In[8]:
+        episode_score = rewards_lst.sum(dim=0).item()
+        scores_window.append(episode_score)
+        save_scores.append(episode_score)
+        
+        gea, target_value = calc_returns(rewards = rewards_lst,
+                                        values = values_lst,
+                                        dones=dones_list)
+        gea = (gea - gea.mean()) / (gea.std() + 1e-8)
 
+        policy.train()
 
-# run your own policy!
-policy=ActorCritic(state_size=(screen_height, screen_width),
-              action_size=action_size,
-              shared_layers=[128, 64],
-              critic_hidden_layers=[64],
-              actor_hidden_layers=[64],
-              init_type='xavier-uniform',
-              seed=0).to(device)
-
-# we use the adam optimizer with learning rate 2e-4
-# optim.SGD is also possible
-optimizer = optim.Adam(policy.parameters(), lr=2e-4)
-
-
-# In[9]:
-
-
-PATH = 'policy_ppo.pt'
-
-
-# In[9]:
-
-
-writer = SummaryWriter()
-best_mean_reward = None
-
-scores_window = deque(maxlen=100)  # last 100 scores
-
-discount = 0.993
-epsilon = 0.07
-beta = .01
-opt_epoch = 10
-episode = 100
-batch_size = 128
-tmax = 1000 #env episode steps
-save_scores = []
-start_time = timeit.default_timer()
-
-for s in range(episode):
-    policy.eval()
-    old_probs_lst, states_lst, actions_lst, rewards_lst, values_lst, dones_list = collect_trajectories(envs=env,
-                                                                                                       policy=policy,
-                                                                                                       tmax=tmax,
-                                                                                                       nrand = 5)
-
-    episode_score = rewards_lst.sum(dim=0).item()
-    scores_window.append(episode_score)
-    save_scores.append(episode_score)
-    
-    gea, target_value = calc_returns(rewards = rewards_lst,
-                                     values = values_lst,
-                                     dones=dones_list)
-    gea = (gea - gea.mean()) / (gea.std() + 1e-8)
-
-    policy.train()
-
-    # cat all agents
-    def concat_all(v):
-        #print(v.shape)
-        if len(v.shape) == 3:#actions
-            return v.reshape([-1, v.shape[-1]])
-        if len(v.shape) == 5:#states
-            v = v.reshape([-1, v.shape[-3], v.shape[-2],v.shape[-1]])
+        # cat all agents
+        def concat_all(v):
             #print(v.shape)
-            return v
-        return v.reshape([-1])
+            if len(v.shape) == 3:#actions
+                return v.reshape([-1, v.shape[-1]])
+            if len(v.shape) == 5:#states
+                v = v.reshape([-1, v.shape[-3], v.shape[-2],v.shape[-1]])
+                #print(v.shape)
+                return v
+            return v.reshape([-1])
 
-    old_probs_lst = concat_all(old_probs_lst)
-    states_lst = concat_all(states_lst)
-    actions_lst = concat_all(actions_lst)
-    rewards_lst = concat_all(rewards_lst)
-    values_lst = concat_all(values_lst)
-    gea = concat_all(gea)
-    target_value = concat_all(target_value)
+        old_probs_lst = concat_all(old_probs_lst)
+        states_lst = concat_all(states_lst)
+        actions_lst = concat_all(actions_lst)
+        rewards_lst = concat_all(rewards_lst)
+        values_lst = concat_all(values_lst)
+        gea = concat_all(gea)
+        target_value = concat_all(target_value)
 
-    # gradient ascent step
-    n_sample = len(old_probs_lst)//batch_size
-    idx = np.arange(len(old_probs_lst))
-    np.random.shuffle(idx)
-    for epoch in range(opt_epoch):
-        for b in range(n_sample):
-            ind = idx[b*batch_size:(b+1)*batch_size]
-            g = gea[ind]
-            tv = target_value[ind]
-            actions = actions_lst[ind]
-            old_probs = old_probs_lst[ind]
+        # gradient ascent step
+        n_sample = len(old_probs_lst)//batch_size
+        idx = np.arange(len(old_probs_lst))
+        np.random.shuffle(idx)
+        for epoch in range(opt_epoch):
+            for b in range(n_sample):
+                ind = idx[b*batch_size:(b+1)*batch_size]
+                g = gea[ind]
+                tv = target_value[ind]
+                actions = actions_lst[ind]
+                old_probs = old_probs_lst[ind]
 
-            action_est, values = policy(states_lst[ind])
-            sigma = nn.Parameter(torch.zeros(action_size))
-            dist = torch.distributions.Normal(action_est, F.softplus(sigma).to(device))
-            log_probs = dist.log_prob(actions)
-            log_probs = torch.sum(log_probs, dim=-1)
-            entropy = torch.sum(dist.entropy(), dim=-1)
+                action_est, values = policy(states_lst[ind])
+                sigma = nn.Parameter(torch.zeros(action_size))
+                dist = torch.distributions.Normal(action_est, F.softplus(sigma).to(device))
+                log_probs = dist.log_prob(actions)
+                log_probs = torch.sum(log_probs, dim=-1)
+                entropy = torch.sum(dist.entropy(), dim=-1)
 
-            ratio = torch.exp(log_probs - old_probs)
-            ratio_clipped = torch.clamp(ratio, 1 - epsilon, 1 + epsilon)
-            L_CLIP = torch.mean(torch.min(ratio*g, ratio_clipped*g))
-            # entropy bonus
-            S = entropy.mean()
-            # squared-error value function loss
-            L_VF = 0.5 * (tv - values).pow(2).mean()
-            # clipped surrogate
-            L = -(L_CLIP - L_VF + beta*S)
-            optimizer.zero_grad()
-            # This may need retain_graph=True on the backward pass
-            # as pytorch automatically frees the computational graph after
-            # the backward pass to save memory
-            # Without this, the chain of derivative may get lost
-            L.backward(retain_graph=True)
-            torch.nn.utils.clip_grad_norm_(policy.parameters(), 10.0)
-            optimizer.step()
-            del(L)
+                ratio = torch.exp(log_probs - old_probs)
+                ratio_clipped = torch.clamp(ratio, 1 - epsilon, 1 + epsilon)
+                L_CLIP = torch.mean(torch.min(ratio*g, ratio_clipped*g))
+                # entropy bonus
+                S = entropy.mean()
+                # squared-error value function loss
+                L_VF = 0.5 * (tv - values).pow(2).mean()
+                # clipped surrogate
+                L = -(L_CLIP - L_VF + beta*S)
+                optimizer.zero_grad()
+                L.backward(retain_graph=True)
+                torch.nn.utils.clip_grad_norm_(policy.parameters(), 10.0)
+                optimizer.step()
+                del(L)
 
-    # the clipping parameter reduces as time goes on
-    epsilon*=.999
-    
-    # the regulation term also reduces
-    # this reduces exploration in later runs
-    beta*=.998
+        # the clipping parameter reduces as time goes on
+        epsilon*=.999
+        
+        # the regulation term also reduces
+        # this reduces exploration in later runs
+        beta*=.998
 
-    mean_reward = np.mean(scores_window)
-    writer.add_scalar("epsilon", epsilon, s)
-    writer.add_scalar("beta", beta, s)
-    # display some progress every n iterations
-    if best_mean_reward is None or best_mean_reward < mean_reward:
-                # For saving the model and possibly resuming training
-                torch.save({
-                        'policy_state_dict': policy.state_dict(),
-                        'optimizer_state_dict': optimizer.state_dict(),
-                        'epsilon': epsilon,
-                        'beta': beta
-                        }, PATH)
-                if best_mean_reward is not None:
-                    print("Best mean reward updated %.3f -> %.3f, model saved" % (best_mean_reward, mean_reward))
-                best_mean_reward = mean_reward
-    if s>=25 and mean_reward>50:
-        print('Environment solved in {:d} episodes!\tAverage Score: {:.2f}'.format(s+1, mean_reward))
-        break
+        mean_reward = np.mean(scores_window)
+        writer.add_scalar("epsilon", epsilon, s)
+        writer.add_scalar("beta", beta, s)
+        # display some progress every n iterations
+        if best_mean_reward is None or best_mean_reward < mean_reward:
+                    # For saving the model and possibly resuming training
+                    torch.save({
+                            'policy_state_dict': policy.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'epsilon': epsilon,
+                            'beta': beta
+                            }, PATH)
+                    if best_mean_reward is not None:
+                        print("Best mean reward updated %.3f -> %.3f, model saved" % (best_mean_reward, mean_reward))
+                    best_mean_reward = mean_reward
+        if s>=25 and mean_reward>50:
+            print('Environment solved in {:d} episodes!\tAverage Score: {:.2f}'.format(s+1, mean_reward))
+            break
 
-
-print('Average Score: {:.2f}'.format(mean_reward))
-elapsed = timeit.default_timer() - start_time
-print("Elapsed time: {}".format(timedelta(seconds=elapsed)))
-writer.close()
-env.close()
-
-
-# In[12]:
-
-
-fig = plt.figure()
-plt.plot(np.arange(len(save_scores)), save_scores)
-plt.ylabel('Score')
-plt.xlabel('episode #')
-plt.grid()
-plt.show()
-
-
-# ## Evaluation
-
-# In[10]:
-
-
-episode = 10
-scores_window = deque(maxlen=100)  # last 100 scores
-env = KukaDiverseObjectEnv(renders=False, isDiscrete=False, removeHeightHack=False, maxSteps=20, isTest=True)
-env.cid = p.connect(p.DIRECT)
-# load the model
-checkpoint = torch.load(PATH)
-policy.load_state_dict(checkpoint['policy_state_dict'])
+        elapsed = timeit.default_timer() - start_time
+        print("Elapsed time: {}".format(timedelta(seconds=elapsed)))
+        writer.close()
+        return save_scores
 
 # evaluate the model
-for e in range(episode):
-    rewards = eval_policy(envs=env, policy=policy)
-    reward = np.sum(rewards,0)
-    print("Episode: {0:d}, reward: {1}".format(e+1, reward), end="\n")
+def evaluate(env, policy, checkpoint_path, episode=10):
+    scores = []
+    checkpoint = torch.load(checkpoint_path)
+    policy.load_state_dict(checkpoint['policy_state_dict'])
 
+    for e in range(episode):
+        rewards = eval_policy(env, policy)
+        reward = np.sum(rewards, 0)
+        print("Episode: {0:d}, reward: {1}".format(e + 1, reward), end="\n")
+        scores.append(reward)
+
+    return scores
+
+def main():
+    env = KukaDiverseObjectEnv(renders=False, isDiscrete=False, removeHeightHack=False, maxSteps=20, isTest=True)
+    env.cid = p.connect(p.DIRECT)
+
+    # Initialize your policy here
+    policy = ActorCritic(state_size=(screen_height, screen_width),
+                          action_size=action_size,
+                          shared_layers=[128, 64],
+                          critic_hidden_layers=[64],
+                          actor_hidden_layers=[64],
+                          init_type='xavier-uniform',
+                          seed=0).to(device)
+
+    optimizer = optim.Adam(policy.parameters(), lr=2e-4)
+
+    checkpoint_path = 'policy_ppo.pt'
+
+    training_scores = train(env, policy, optimizer)
+    plt.figure()
+    plt.plot(np.arange(len(training_scores)), training_scores)
+    plt.ylabel('Score')
+    plt.xlabel('Episode #')
+    plt.grid()
+    plt.show()
+
+    env.close()
+
+    # For evaluation
+    evaluation_scores = evaluate(env, policy, checkpoint_path)
+    env.close()
+
+
+if __name__ == "__main__":
+    main()
